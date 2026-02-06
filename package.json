@@ -1,0 +1,46 @@
+{
+  "name": "opencode-rovodev-auth",
+  "version": "1.0.0",
+  "description": "Atlassian Rovo Dev authentication plugin for OpenCode - Access Claude Sonnet 4 with 20M tokens/day using Rovo Dev credentials",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "license": "MIT",
+  "author": "dav1lex",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dav1lex/opencode-rovodev-auth.git"
+  },
+  "homepage": "https://github.com/dav1lex/opencode-rovodev-auth#readme",
+  "bugs": {
+    "url": "https://github.com/dav1lex/opencode-rovodev-auth/issues"
+  },
+  "keywords": [
+    "opencode",
+    "atlassian",
+    "rovo",
+    "rovodev",
+    "claude",
+    "sonnet",
+    "auth",
+    "plugin"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^0.15.30",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
