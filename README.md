@@ -89,6 +89,85 @@ mind when wiring it up:
 If you need a different proxy host/port, update `PROXY_BASE` in
 `src/plugin.ts` and rebuild (`npm run build`).
 
+### Model IDs
+
+The proxy exposes these model ids via `GET /v1/models`:
+
+- `rovodev-auto`
+- `rovodev-claude-sonnet-4-5`
+- `rovodev-claude-haiku-4-5`
+- `rovodev-claude-sonnet-4`
+- `rovodev-gpt-5-2-codex`
+- `rovodev-gpt-5-2`
+- `rovodev-gpt-5-1`
+- `rovodev-gpt-5`
+
+### Example Provider Configuration
+
+Add a provider entry similar to the following in your OpenCode configuration
+(where you define providers/models). The important bits are:
+
+- `baseURL`: `http://localhost:4100/v1`
+- `compatibility`: `"compatible"`
+- model keys match the ids returned by `GET /v1/models`
+
+```json
+{
+  "atlassian-rovodev": {
+    "npm": "@ai-sdk/openai",
+    "options": {
+      "baseURL": "http://localhost:4100/v1",
+      "compatibility": "compatible"
+    },
+    "models": {
+      "rovodev-auto": {
+        "name": "Rovo Dev (Auto)",
+        "limit": { "context": 200000, "output": 64000 },
+        "modalities": { "input": ["text"], "output": ["text"] }
+      },
+      "rovodev-claude-sonnet-4-5": {
+        "name": "Claude Sonnet 4.5 (Rovo Dev)",
+        "limit": { "context": 200000, "output": 64000 },
+        "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+      },
+      "rovodev-claude-haiku-4-5": {
+        "name": "Claude Haiku 4.5 (Rovo Dev)",
+        "limit": { "context": 200000, "output": 64000 },
+        "modalities": { "input": ["text", "image"], "output": ["text"] }
+      },
+      "rovodev-claude-sonnet-4": {
+        "name": "Claude Sonnet 4 (Rovo Dev)",
+        "limit": { "context": 200000, "output": 64000 },
+        "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+      },
+      "rovodev-gpt-5-2-codex": {
+        "name": "GPT-5.2-Codex (Rovo Dev)",
+        "limit": { "context": 200000, "output": 64000 },
+        "modalities": { "input": ["text"], "output": ["text"] }
+      },
+      "rovodev-gpt-5-2": {
+        "name": "GPT-5.2 (Rovo Dev)",
+        "limit": { "context": 200000, "output": 64000 },
+        "modalities": { "input": ["text"], "output": ["text"] }
+      },
+      "rovodev-gpt-5-1": {
+        "name": "GPT-5.1 (Rovo Dev)",
+        "limit": { "context": 200000, "output": 64000 },
+        "modalities": { "input": ["text"], "output": ["text"] }
+      },
+      "rovodev-gpt-5": {
+        "name": "GPT-5 (Rovo Dev)",
+        "limit": { "context": 200000, "output": 64000 },
+        "modalities": { "input": ["text"], "output": ["text"] }
+      }
+    }
+  }
+}
+```
+
+Note: the proxy currently extracts and forwards text only. If your client sends
+multimodal content blocks (images/PDFs), they will be ignored by the proxy.
+
 ## Development
 
 Install deps:
