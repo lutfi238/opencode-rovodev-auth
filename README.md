@@ -228,13 +228,18 @@ Use a provider entry equivalent to the following shape in your OpenCode config:
         "limit": { "context": 200000, "output": 64000 },
         "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
       },
-      "rovodev-gpt-5-2-codex": {
-        "name": "GPT-5.2-Codex (Rovo Dev)",
+      "rovodev-claude-sonnet-4-6": {
+        "name": "Claude Sonnet 4.6 (Rovo Dev)",
         "limit": { "context": 200000, "output": 64000 },
         "modalities": { "input": ["text"], "output": ["text"] }
       },
-      "rovodev-gpt-5-2": {
-        "name": "GPT-5.2 (Rovo Dev)",
+      "rovodev-gemini-3-flash-preview": {
+        "name": "Gemini 3 Flash (preview) (Rovo Dev)",
+        "limit": { "context": 200000, "output": 64000 },
+        "modalities": { "input": ["text"], "output": ["text"] }
+      },
+      "rovodev-gpt-5": {
+        "name": "GPT-5 (Rovo Dev)",
         "limit": { "context": 200000, "output": 64000 },
         "modalities": { "input": ["text"], "output": ["text"] }
       },
@@ -243,8 +248,18 @@ Use a provider entry equivalent to the following shape in your OpenCode config:
         "limit": { "context": 200000, "output": 64000 },
         "modalities": { "input": ["text"], "output": ["text"] }
       },
-      "rovodev-gpt-5": {
-        "name": "GPT-5 (Rovo Dev)",
+      "rovodev-gpt-5-2": {
+        "name": "GPT-5.2 (Rovo Dev)",
+        "limit": { "context": 200000, "output": 64000 },
+        "modalities": { "input": ["text"], "output": ["text"] }
+      },
+      "rovodev-gpt-5-2-codex": {
+        "name": "GPT-5.2-Codex (Rovo Dev)",
+        "limit": { "context": 200000, "output": 64000 },
+        "modalities": { "input": ["text"], "output": ["text"] }
+      },
+      "rovodev-gpt-5-4": {
+        "name": "GPT-5.4 (Rovo Dev)",
         "limit": { "context": 200000, "output": 64000 },
         "modalities": { "input": ["text"], "output": ["text"] }
       }
@@ -258,13 +273,31 @@ Use a provider entry equivalent to the following shape in your OpenCode config:
 Current `/v1/models` output includes:
 
 - `rovodev-auto`
-- `rovodev-claude-sonnet-4-5`
-- `rovodev-claude-sonnet-4`
 - `rovodev-claude-haiku-4-5`
-- `rovodev-gpt-5-2-codex`
-- `rovodev-gpt-5-2`
-- `rovodev-gpt-5-1`
+- `rovodev-claude-sonnet-4`
+- `rovodev-claude-sonnet-4-5`
+- `rovodev-claude-sonnet-4-6`
+- `rovodev-gemini-3-flash-preview`
 - `rovodev-gpt-5`
+- `rovodev-gpt-5-1`
+- `rovodev-gpt-5-2`
+- `rovodev-gpt-5-2-codex`
+- `rovodev-gpt-5-4`
+
+These names correspond to the current Rovo Dev model list shown in the UI:
+
+- Claude Haiku 4.5
+- Claude Sonnet 4
+- Claude Sonnet 4.5
+- Claude Sonnet 4.6
+- Gemini 3 Flash (preview)
+- GPT-5
+- GPT-5.1
+- GPT-5.2
+- GPT-5.2-Codex
+- GPT-5.4
+
+`rovodev-auto` is kept as a local convenience alias for OpenCode-side selection.
 
 ## Example End-To-End Startup Checklist
 
