@@ -1,150 +1,185 @@
 # Agent Notes: opencode-rovodev-auth
 
-Purpose: OpenCode authentication plugin for Atlassian Rovo Dev + optional local proxy.
+Purpose: OpenCode authentication plugin for Atlassian Rovo Dev + optional local proxy that
+exposes an OpenAI-compatible `/v1/*` API backed by Rovo Dev's `/v3/*` serve mode.
 
 ## Tooling / Environment
+
 - Node: >= 20 (see `package.json#engines`)
-- Package manager: npm (lockfile: `package-lock.json`)
-- TypeScript: `tsc` (build + typecheck)
-- Optional runtime for proxy: Bun (`rovodev-proxy.ts` is executed by bun)
+- Package manager: npm (`package-lock.json` present; use `npm ci` to install)
+- TypeScript: `tsc` (build + typecheck); target ES2022, moduleResolution `bundler`
+- Optional runtime for proxy: Bun (`rovodev-proxy.ts` is executed by bun, not tsc)
 
 ## Common Commands
 
-### Install
 ```bash
-npm ci
-# or (if updating deps)
-npm install
-```
-
-### Build (emits `dist/`)
-```bash
-npm run build
-```
-
-### Typecheck (no output)
-```bash
-npm run typecheck
+npm ci                    # install (use npm install only when changing deps)
+npm run build             # compile src/ → dist/
+npm run typecheck         # tsc --noEmit (no output on success)
 ```
 
 ### Run Local Rovo Dev Proxy (dev utility)
-Prereqs: `bun` + Atlassian CLI (`acli`) authenticated.
+
+Prereqs: `bun` installed + Atlassian CLI (`acli`) authenticated for rovodev.
 
 ```bash
-# 1) Start Rovo Dev serve mode (default port 8123)
+# 1) Start Rovo Dev serve mode
 acli rovodev serve 8123 --disable-session-token
 
-# 2) Start proxy (default port 4100)
+# 2) Start proxy (default: rovodev 8123, proxy 4100)
 bun rovodev-proxy.ts
-# or:
 bun rovodev-proxy.ts --rovodev-port 8123 --proxy-port 4100
 ```
 
-Windows helper:
-- `start-rovodev.bat` (starts both `acli rovodev serve` and `bun rovodev-proxy.ts`)
+Windows helper: `start-rovodev.bat` (launches both processes).
 
-Quick smoke checks: `curl http://localhost:4100/health` and `curl http://localhost:4100/v1/models`
+Smoke checks:
+```bash
+curl http://localhost:4100/health
+curl http://localhost:4100/v1/models
+```
 
-## Lint / Format / Tests (Current State)
-- Lint: not configured (no ESLint/Biome script).
-- Formatting: not enforced by tooling; keep existing style consistent.
-- Tests: no test runner configured.
+## Lint / Format / Tests
 
-### Running A Single Test (If/When Tests Are Added)
-Pick ONE runner and wire it into `package.json`. Suggested options:
+- Lint: not configured.
+- Formatting: not enforced by tooling; match existing style.
+- Tests: no test runner configured. Do NOT claim tests exist unless you add them.
 
-- Node built-in test runner:
-  - `node --test test/my-feature.test.ts`
-  - `node --test --test-name-pattern "parses SSE" test/my-feature.test.ts`
+### Adding Tests (If/When Needed)
 
-- Vitest:
-  - `npx vitest test/my-feature.test.ts`
-  - `npx vitest -t "parses SSE" test/my-feature.test.ts`
+Pick ONE runner and wire it into `package.json`. Suggested single-test commands:
 
-- Bun:
-  - `bun test test/my-feature.test.ts` (supports `-t "name"`)
+```bash
+# Node built-in
+node --test test/my-feature.test.ts
+node --test --test-name-pattern "parses SSE" test/my-feature.test.ts
 
-(Agents: do not claim tests exist unless you add them.)
+# Vitest
+npx vitest test/my-feature.test.ts
+npx vitest -t "parses SSE" test/my-feature.test.ts
+
+# Bun
+bun test test/my-feature.test.ts
+bun test --test-name-pattern "parses SSE" test/my-feature.test.ts
+```
 
 ## Repository Layout
-- `src/plugin.ts`: OpenCode plugin (default export)
-- `src/index.ts`: library entry point; re-exports plugin (note the `.js` import extension)
-- `tsconfig.json`: strict TS build to `dist/`
-- `rovodev-proxy.ts`: Bun server translating OpenAI-style `/v1/*` to Rovo Dev `/v3/*`
-- `dist/`: generated output (ignored by git; do not edit manually)
-- `node_modules/`: ignored by git
+
+```
+src/
+  index.ts                          # library entry point (re-exports plugin)
+  plugin.ts                         # OpenCode plugin: auth hook + URL rewriting
+  runtime/
+    server.ts                       # createRuntimeServer(): routes /v1/* requests
+    backend/
+      rovo-serve-driver.ts          # RovoServeDriver: queued request → /v3/* Rovo Dev
+      types.ts                      # BackendDriver, BackendTurnRequest, etc.
+    diagnostics/
+      logger.ts                     # logRequestSummary, logWarning helpers
+    openai/
+      chat.ts                       # POST /v1/chat/completions handler
+      models.ts                     # GET /v1/models handler
+      responses.ts                  # POST /v1/responses handler
+    policy/
+      capability-policy.ts          # ROVO_SERVE_CAPABILITIES constant
+      model-policy.ts               # model list/validation
+    session/
+      message-compiler.ts           # normalizeIncomingMessages, formatMessages, etc.
+      response-builder.ts           # OpenAI response shape builders
+      session-store.ts              # session state helpers
+    stream/
+      sse-mapper.ts                 # maps backend SSE events → OpenAI SSE events
+      sse-parser.ts                 # parseSSELines, extractBackendText, isBackendStreamEnd
+rovodev-proxy.ts                    # Bun entrypoint (not included by tsconfig)
+dist/                               # tsc output — never hand-edit
+```
+
+**Important:** `rovodev-proxy.ts` is NOT included in `tsconfig.json`. `npm run build` and
+`npm run typecheck` only validate `src/**/*`.
 
 ## TypeScript + ESM Style Guide
 
-### Module system / imports
-- This package is ESM (`"type": "module"`). Use `import` / `export` only.
-- Use `.js` extensions in relative imports in TS source that will run as JS:
-  - Good: `export { default } from "./plugin.js";`
-  - Avoid: `export { default } from "./plugin";` (breaks Node ESM)
-- Prefer `import type { ... }` for purely type imports.
+### Module System / Imports
 
-### Import ordering
-- Group imports with a blank line:
-  1) Node built-ins (rare here)
-  2) external packages
-  3) local modules
-- Keep imports at the top of the file; avoid dynamic requires.
+- Package is ESM (`"type": "module"`). Use `import`/`export` only; never `require`.
+- Use `.js` extensions in relative imports in TS source:
+  - Good: `import { foo } from "./bar.js";`
+  - Bad: `import { foo } from "./bar";` (breaks Node ESM resolution)
+- Prefer `import type { ... }` for type-only imports.
+- Import order (blank line between groups):
+  1. Node built-ins
+  2. External packages
+  3. Local modules
 
-### Formatting (match existing code)
+### Formatting
+
 - Indentation: 2 spaces.
 - Strings: double quotes.
-- Semicolons: yes.
+- Semicolons: required.
 - Trailing commas: in multiline objects/arrays.
-- Wrap long ternaries / chains for readability (see `src/plugin.ts`).
+- Wrap long ternaries and chains for readability.
 
 ### Types
-- `tsconfig.json` has `strict: true`; new code must typecheck under strict mode.
-- Prefer:
-  - `unknown` + narrowing over `any`
-  - `as const` for string literal fields that must stay narrow
-  - small helper types/functions instead of repeated inline `any`
-- If you must use `any` (e.g. untyped JSON/SSE payloads), isolate it to parsing boundaries.
 
-### Naming conventions
-- Types/interfaces/classes: `PascalCase`
-- Functions/variables: `camelCase`
+- `strict: true` is enabled; all new code must pass strict typecheck.
+- Prefer `unknown` + narrowing over `any`.
+- Use `any` only at parsing boundaries (e.g. raw JSON/SSE payloads); isolate it.
+- Use `as const` for narrow string literal fields.
+- Prefer small named helper types over repeated large inline object types.
+
+### Naming Conventions
+
+- Types / interfaces / classes: `PascalCase`
+- Functions / variables: `camelCase`
 - Module-level constants: `SCREAMING_SNAKE_CASE` (e.g. `ROVODEV_PROVIDER_ID`)
-- Avoid abbreviations unless they are domain-standard (SSE, URL, HTTP, SDK).
+- Abbreviations only when domain-standard: SSE, URL, HTTP, SDK.
 
-### Error handling
-- Treat all network responses and JSON as untrusted.
-- Use `try/catch` around `req.json()`, upstream `fetch()`, and SSE JSON parsing.
-- When catching, prefer `catch (err: unknown)` and narrow before reading `err.message`.
-- Proxy error responses should be structured and consistent:
+### Error Handling
+
+- Treat all network responses, JSON payloads, and SSE data as untrusted.
+- Wrap `req.json()`, upstream `fetch()`, and SSE JSON parsing in `try/catch`.
+- Catch with `catch (err: unknown)` and narrow before reading `err.message`.
+- Structured error response shape:
   - `{ error: { message: string, type: "invalid_request_error" | "proxy_error" } }`
-  - Use correct status codes (400 invalid JSON, 404 unknown endpoint, 502 upstream issues).
-- Do not leak secrets in error messages or logs.
+- Status codes: `400` bad input, `404` unknown route, `502` upstream/proxy failure.
+- Do not leak credentials, tokens, or raw auth headers in errors or logs.
 
-### Streaming / SSE specifics
-- Keep streaming resilient:
-  - buffer partial lines between chunks
-  - ignore blank lines and comment lines beginning with `:`
-  - skip unparsable JSON events
-  - ensure the client always receives a terminal stop + `[DONE]` if upstream ends early
-- Rovo Dev serves a single agent session:
-  - keep the request queue (`requestQueue` / `enqueue`) behavior intact
-  - do not parallelize requests without carefully preserving session semantics
+### Streaming / SSE
 
-### Web/Fetch APIs
-- Prefer Web standard types (`Request`, `Response`, `Headers`).
-- When rewriting requests (plugin fetch hook), do not mutate caller headers:
-  - `const headers = new Headers(init?.headers);`
-- Use timeouts for upstream probes/health checks (e.g. `AbortSignal.timeout(3000)`).
+- Buffer partial SSE lines between chunks.
+- Ignore blank lines and comment lines beginning with `:`.
+- Skip malformed JSON events rather than crashing the stream.
+- Always emit a terminal stop event + `[DONE]` to the client if upstream ends early.
+- Text extraction: use `extractBackendText()` in `sse-parser.ts`; preserve fallbacks.
+- Rovo Dev is a single-session agent: keep the `requestQueue` / `enqueue` pattern in
+  `RovoServeDriver` intact. Do not parallelize requests without preserving session semantics.
+- Rovo Dev `409` means the agent is busy; `waitForAgentIdle()` handles retry backoff.
 
-### Generated artifacts
-- `dist/` is output from `tsc`; never hand-edit.
-- If you add new entry points, update `tsconfig.json` and `package.json` fields (`main`, `types`, `files`).
+### HTTP / Headers
+
+- Do not mutate caller-provided headers; copy: `const headers = new Headers(init?.headers);`
+- The plugin strips `Authorization` before proxying (auth is handled by `acli rovodev serve`).
+- Keep `Content-Type: application/json` where the flow expects JSON bodies.
+- Use `AbortSignal.timeout(ms)` for probes and health checks.
+
+### Proxy Architecture Notes
+
+- `plugin.ts`: rewrites all SDK request URLs to `http://localhost:4100/v1/*` regardless of
+  what baseURL the SDK produces (handles `undefined/...` broken URLs gracefully).
+- `server.ts`: routes `/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/health`.
+- `rovo-serve-driver.ts`: serializes requests through a promise queue; retries on `409`.
+- `message-compiler.ts`: normalizes Chat Completions and Responses API bodies into
+  `RuntimeMessage[]`; `formatMessages()` produces the final prompt string sent to Rovo Dev.
 
 ## Cursor / Copilot Instructions
+
 - No Cursor rules found (`.cursor/rules/` or `.cursorrules` absent).
 - No Copilot instructions found (`.github/copilot-instructions.md` absent).
 
 ## Before Finishing Work
-- Run `npm run typecheck` (required).
-- Run `npm run build` if your change affects published output.
-- Keep diffs focused on source (`src/`), not `dist/` or `node_modules/`.
+
+- Run `npm run typecheck` — required for every source change.
+- Run `npm run build` — required if the change affects published output under `src/`.
+- Keep diffs focused on `src/`; never edit `dist/` or `node_modules/`.
+- If adding a new published entry point, update `main`, `types`, and `files` in `package.json`
+  and the `include`/`outDir` in `tsconfig.json`.
