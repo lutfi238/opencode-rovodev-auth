@@ -1,115 +1,203 @@
 # opencode-rovodev-auth
 
-Atlassian Rovo Dev authentication plugin for OpenCode.
+Atlassian Rovo Dev authentication plugin for OpenCode, plus an optional local
+runtime proxy that exposes an OpenAI-compatible `/v1/*` API on top of Rovo Dev
+serve mode.
 
-This repo also includes an optional local proxy that translates OpenAI-compatible
-`/v1/*` requests into Rovo Dev "serve mode" `/v3/*` calls and streams responses
-back in OpenAI SSE format.
+This project is for people who want to use Rovo Dev credits/models through an
+OpenCode-compatible workflow without building a separate provider integration
+from scratch.
 
-## What You Get
+## What This Repository Provides
 
-- OpenCode auth plugin (`src/plugin.ts`) with provider id `atlassian-rovodev`.
-- Bun proxy server (`rovodev-proxy.ts`) that exposes:
-  - `GET /health` and `GET /healthcheck`
-  - `GET /v1/models`
-  - `POST /v1/chat/completions` (streaming + non-streaming)
-  - `POST /v1/responses` (streaming + non-streaming)
+- An OpenCode plugin exported from `dist/index.js`
+- A local Bun entrypoint (`rovodev-proxy.ts`)
+- A runtime layer under `src/runtime/` that:
+  - accepts OpenAI-compatible requests
+  - normalizes request bodies from OpenCode
+  - forwards them to `acli rovodev serve`
+  - translates streamed output back into OpenAI-compatible response shapes
 
-## How It Works
+Supported local endpoints:
 
-High level flow:
+- `GET /health`
+- `GET /healthcheck`
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- `POST /v1/responses`
 
-```
+## Who This Is For
+
+Use this project if you want to:
+
+- run Rovo Dev locally and route OpenCode traffic into it
+- expose a local OpenAI-compatible endpoint for OpenCode
+- experiment with a runtime compatibility layer instead of a direct provider API
+
+This project is not a hosted service. It is a local development utility.
+
+## High-Level Flow
+
+```text
 OpenCode
-  -> (plugin fetch hook rewrites all URLs)
-  -> http://localhost:4100/v1/...
-  -> rovodev-proxy.ts (bun)
-  -> http://localhost:8123/v3/... (acli rovodev serve)
+  -> plugin (src/plugin.ts)
+  -> local runtime server (rovodev-proxy.ts + src/runtime/server.ts)
+  -> backend driver (src/runtime/backend/rovo-serve-driver.ts)
+  -> Atlassian Rovo Dev serve mode (acli rovodev serve /v3/*)
 ```
 
-Notes:
+## Important Limitations
 
-- The plugin intentionally strips the `Authorization` header because
-  authentication is handled by the Atlassian CLI session that runs
-  `acli rovodev serve`.
-- When OpenCode prompts for an API key, you can enter any placeholder
+Read this before using the plugin.
+
+- The backend is still `acli rovodev serve`, not a native OpenCode runtime.
+- The runtime is text-first. Non-text multimodal parts are not forwarded.
+- Unsupported tool-calling fields are stripped conservatively.
+- Usage/token accounting is synthetic where Rovo serve mode does not expose
+  reliable values.
+- The backend behaves like a single active session, so requests are serialized.
+- The plugin strips `Authorization` before proxying because authentication comes
+  from your local Atlassian CLI session, not from an OpenAI API key.
+- When OpenCode asks for an API key, any placeholder string is acceptable
   (for example `rovodev`).
+
+## Runtime Architecture
+
+- `src/runtime/server.ts`
+  - HTTP routing
+  - JSON parsing
+  - CORS handling
+  - health endpoints
+- `src/runtime/backend/rovo-serve-driver.ts`
+  - request queue
+  - `/v3/*` transport
+  - busy-session retry flow
+  - health probe
+- `src/runtime/openai/chat.ts`
+  - `/v1/chat/completions`
+  - streaming and non-streaming response shaping
+- `src/runtime/openai/responses.ts`
+  - `/v1/responses`
+  - streaming and non-streaming Responses API shaping
+- `src/runtime/openai/models.ts`
+  - `/v1/models`
+- `src/runtime/session/message-compiler.ts`
+  - message normalization
+  - prompt compilation
+- `src/runtime/session/response-builder.ts`
+  - shared usage and finish-reason policy
+- `src/runtime/session/output-guard.ts`
+  - suppresses clearly internal narration preambles before returning text
+- `src/runtime/stream/*.ts`
+  - SSE parsing and mapping
+- `src/runtime/policy/*.ts`
+  - model list and backend capability policy
 
 ## Prerequisites
 
-- Node.js >= 20 (build/typecheck)
+You need all of the following:
+
+- Node.js `>= 20`
 - npm
-- Bun (to run the proxy)
-- Atlassian CLI (`acli`) and a logged-in Rovo Dev session
+- Bun
+- Atlassian CLI (`acli`)
+- a working Rovo Dev login/session in the Atlassian CLI
 
-## Quick Start
+## Installation And Build
 
-### Windows (recommended)
+Clone the repository and install dependencies:
 
-Use the helper script that starts both Rovo Dev serve mode and the proxy:
-
-```bat
-start-rovodev.bat
+```bash
+npm ci
 ```
 
-### macOS / Linux
+Build the plugin/runtime output:
 
-1) Start Rovo Dev serve mode (default port `8123`):
+```bash
+npm run build
+```
+
+Optional verification:
+
+```bash
+npm run typecheck
+```
+
+The build output goes to `dist/`.
+
+## Step 1: Start Rovo Dev Serve Mode
+
+Default Rovo Dev port used by this repo: `8123`
 
 ```bash
 acli rovodev serve 8123 --disable-session-token
 ```
 
-2) Start the proxy (default port `4100`):
+If this command is not healthy, the proxy will not work.
+
+## Step 2: Start The Local Proxy
+
+Default proxy port used by this repo: `4100`
 
 ```bash
 bun rovodev-proxy.ts
-# or customize ports
+```
+
+Or choose explicit ports:
+
+```bash
 bun rovodev-proxy.ts --rovodev-port 8123 --proxy-port 4100
 ```
 
-3) Smoke check:
+### Windows Helper
+
+On Windows, you can use:
+
+```bat
+start-rovodev.bat
+```
+
+The helper script starts Rovo Dev serve mode from the repository directory,
+forwards Git into the launched shell, and then starts the local proxy. This is
+useful because running `acli rovodev serve` from the wrong working directory can
+produce Git/workspace warnings in Rovo Dev.
+
+## Step 3: Verify The Local Runtime
+
+Check that the proxy is up:
 
 ```bash
 curl http://localhost:4100/health
 curl http://localhost:4100/v1/models
 ```
 
-## OpenCode Setup
+Expected outcomes:
 
-This package exports a default OpenCode plugin from `dist/index.js`.
+- `/health` responds successfully
+- `/v1/models` returns the available `rovodev-*` model ids
 
-Because OpenCode plugin loading/config can vary by version, keep these facts in
-mind when wiring it up:
+## Step 4: Connect It To OpenCode
+
+This package exports the OpenCode plugin from `dist/index.js`.
+
+Exact plugin-loading details can vary by OpenCode version, but these values are
+the important constants exposed by this project:
 
 - Provider id: `atlassian-rovodev`
-- Auth method label: `Rovo Dev (Local Proxy)`
-- Proxy base URL is hardcoded by the plugin to `http://localhost:4100`
+- Auth label: `Rovo Dev (Local Proxy)`
+- Proxy base: `http://localhost:4100`
+- OpenAI-compatible API base: `http://localhost:4100/v1`
 
-If you need a different proxy host/port, update `PROXY_BASE` in
-`src/plugin.ts` and rebuild (`npm run build`).
+### OpenCode Configuration Facts
 
-### Model IDs
-
-The proxy exposes these model ids via `GET /v1/models`:
-
-- `rovodev-auto`
-- `rovodev-claude-sonnet-4-5`
-- `rovodev-claude-haiku-4-5`
-- `rovodev-claude-sonnet-4`
-- `rovodev-gpt-5-2-codex`
-- `rovodev-gpt-5-2`
-- `rovodev-gpt-5-1`
-- `rovodev-gpt-5`
+- The provider should target `http://localhost:4100/v1`
+- Compatibility mode should be OpenAI-compatible / compatible
+- Model ids must match the values returned by `GET /v1/models`
+- If OpenCode asks for an API key, enter any placeholder value
 
 ### Example Provider Configuration
 
-Add a provider entry similar to the following in your OpenCode configuration
-(where you define providers/models). The important bits are:
-
-- `baseURL`: `http://localhost:4100/v1`
-- `compatibility`: `"compatible"`
-- model keys match the ids returned by `GET /v1/models`
+Use a provider entry equivalent to the following shape in your OpenCode config:
 
 ```json
 {
@@ -165,12 +253,48 @@ Add a provider entry similar to the following in your OpenCode configuration
 }
 ```
 
-Note: the proxy currently extracts and forwards text only. If your client sends
-multimodal content blocks (images/PDFs), they will be ignored by the proxy.
+### Available Model IDs
 
-## Development
+Current `/v1/models` output includes:
 
-Install deps:
+- `rovodev-auto`
+- `rovodev-claude-sonnet-4-5`
+- `rovodev-claude-sonnet-4`
+- `rovodev-claude-haiku-4-5`
+- `rovodev-gpt-5-2-codex`
+- `rovodev-gpt-5-2`
+- `rovodev-gpt-5-1`
+- `rovodev-gpt-5`
+
+## Example End-To-End Startup Checklist
+
+Use this order every time:
+
+1. `npm run build`
+2. `acli rovodev serve 8123 --disable-session-token`
+3. `bun rovodev-proxy.ts`
+4. `curl http://localhost:4100/health`
+5. open OpenCode and use the `atlassian-rovodev` provider
+6. select one of the `rovodev-*` models
+7. enter a placeholder API key if prompted
+
+## Output Guard
+
+The runtime applies a small output guard to assistant text before returning it
+to OpenAI-compatible clients.
+
+- Leading internal narration such as `let me review` / `let me inspect` style
+  preambles is suppressed when it appears before the real answer.
+- Ordinary answers pass through unchanged.
+- If a reply consists only of suppressed narration, the returned text is an
+  empty string.
+
+This is meant to reduce obvious backend work-log narration leaking into the
+final user-visible response.
+
+## Development Commands
+
+Install dependencies:
 
 ```bash
 npm ci
@@ -182,37 +306,64 @@ Typecheck:
 npm run typecheck
 ```
 
-Build (emits `dist/`):
+Build:
 
 ```bash
 npm run build
 ```
 
-Important:
+Important notes:
 
-- `dist/` is generated output. Do not hand-edit it.
-- This package is ESM (`"type": "module"`). Relative imports in TS use `.js`
-  extensions so the emitted JS runs correctly under Node ESM.
+- `dist/` is generated output, never hand-edit it
+- the project uses ESM (`"type": "module"`)
+- relative TypeScript imports use `.js` extensions intentionally
+- `rovodev-proxy.ts` is run by Bun and is not included in `tsconfig.json`
 
 ## Troubleshooting
 
-- Proxy says it cannot reach Rovo Dev:
-  - Ensure `acli rovodev serve 8123` is running.
-  - Verify `curl http://localhost:8123/healthcheck`.
-- Port already in use:
-  - Change ports using `--rovodev-port` / `--proxy-port` for the proxy.
-  - If you change the proxy port, also update `PROXY_BASE` in `src/plugin.ts`.
-- Rovo Dev returns 409 "busy":
-  - The proxy serializes requests because Rovo Dev serve mode is effectively a
-    single agent session; parallel requests can clobber each other.
+### Proxy Cannot Reach Rovo Dev
 
-## Security
+- confirm `acli rovodev serve 8123 --disable-session-token` is running
+- check `curl http://localhost:8123/healthcheck`
+- restart the proxy after restarting serve mode
 
-This is a local development utility.
+### `InvalidGitRepositoryError` Or Git Warnings In Rovo Dev
 
-- The proxy allows cross-origin requests and does not implement authentication.
-- Do not expose it to untrusted networks.
+- start Rovo Dev from the repository directory, not from your home directory
+- on Windows, prefer `start-rovodev.bat`
+- if an old process is still running on port `8123`, stop it and restart with
+  the helper so the correct working directory and Git path are used
+
+### Port Already In Use
+
+- change proxy ports with `--proxy-port`
+- change backend serve port with `--rovodev-port`
+- if you change the proxy port, also update `PROXY_BASE` in `src/plugin.ts`
+  and rebuild
+
+### Rovo Dev Returns `409 busy`
+
+This is expected sometimes. The runtime serializes requests because Rovo Dev
+serve mode behaves like a single active agent session.
+
+### Multimodal Content Does Not Behave Natively
+
+This runtime currently forwards text-oriented content only. Images and PDFs may
+be represented only by whatever text survives request normalization.
+
+### Output Feels More Like Rovo Dev Than Native OpenCode
+
+That is an architectural limitation of the current backend path. This repo makes
+OpenCode talk to Rovo Dev through a compatibility runtime, but the upstream
+runtime is still Rovo Dev serve mode.
+
+## Security Notes
+
+- The proxy is intended for local development
+- It allows cross-origin requests
+- It does not implement its own authentication layer
+- Do not expose it to untrusted networks
 
 ## License
 
-MIT (see `package.json#license`).
+MIT (see `package.json#license`)
