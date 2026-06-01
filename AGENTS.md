@@ -1,155 +1,276 @@
-# Agent Notes: opencode-rovodev-auth
+# AGENTS.md
 
-Purpose: OpenCode authentication plugin for Atlassian Rovo Dev plus an optional local proxy that exposes an OpenAI-compatible `/v1/*` API.
+## Project Overview
 
-## Environment
-- Node: `>=20` (`package.json#engines`)
-- Package manager: `npm` (`package-lock.json` present)
-- Language: TypeScript + ESM
-- Compiler: `tsc`
-- Optional runtime for local proxy: `bun`
-- Optional external dependency for local proxy flow: Atlassian CLI `acli` authenticated for `rovodev`
+`opencode-rovodev-auth` is an OpenCode authentication plugin for Atlassian Rovo Dev plus an optional local runtime proxy. The plugin rewrites OpenCode provider traffic to a local OpenAI-compatible `/v1/*` API, and the proxy forwards turns to `acli rovodev serve` on its `/v3/*` endpoints. The project is a local development utility, not a hosted service. It is text-first and intentionally models Rovo Dev serve mode as a constrained backend with single-session semantics.
 
-Install with `npm ci`. Use `npm install` only when intentionally changing dependencies.
+## Tech Stack
 
-## Build, Lint, Typecheck, Test
+- Runtime/package: Node.js `>=20`, npm, ESM (`"type": "module"`)
+- Language: TypeScript with `strict: true`
+- Build/typecheck: `tsc`; `src/**/*` compiles to `dist/`
+- OpenCode integration: `@opencode-ai/plugin`
+- Local proxy runtime: Bun executes `rovodev-proxy.ts`
+- External local dependency: Atlassian CLI `acli` authenticated for Rovo Dev
+- HTTP/SSE primitives: Web `Request`, `Response`, `Headers`, `TransformStream`
+- Tests/lint/formatter: no test runner, lint script, or formatter is configured
 
-### Available commands
+## Architecture
+
+### Frontend/UI
+
+There is no frontend UI in this repository. OpenCode is the client, configured to use the plugin/provider and local proxy.
+
+### Backend/runtime
+
+The runtime is a local Bun server. `rovodev-proxy.ts` is the thin bootstrap: it parses `--rovodev-port` and `--proxy-port`, creates a `RovoServeDriver`, and serves `createRuntimeServer(driver)`.
+
+High-level flow:
+
+```text
+OpenCode
+  -> src/plugin.ts auth/fetch hook
+  -> http://localhost:4100/v1/*
+  -> rovodev-proxy.ts Bun bootstrap
+  -> src/runtime/server.ts router
+  -> src/runtime/openai/* request handlers
+  -> src/runtime/backend/rovo-serve-driver.ts
+  -> acli rovodev serve /v3/*
+```
+
+### Data layer/database
+
+No database, ORM, migrations, or persistent data store are present. `src/runtime/session/session-store.ts` contains an in-memory session abstraction, but the active Rovo serve driver treats Rovo Dev as a single local agent session.
+
+### API layer
+
+`src/runtime/server.ts` exposes:
+
+- `GET /health`
+- `GET /healthcheck`
+- `GET /v1/models`
+- `POST /v1/chat/completions`
+- `POST /v1/responses`
+- `OPTIONS *` for CORS preflight
+
+The OpenAI-compatible handlers normalize incoming Chat Completions and Responses request bodies, strip/fallback unsupported capabilities, and shape streaming/non-streaming responses.
+
+### Authentication/authorization
+
+OpenCode auth uses the plugin’s API-key auth method, but the entered key is only a placeholder. `src/plugin.ts` strips `Authorization` before proxying because real auth is the local Atlassian CLI session used by `acli rovodev serve`.
+
+### External integrations
+
+- OpenCode loads the package from `dist/index.js`.
+- `acli rovodev serve 8123 --disable-session-token` provides the upstream local Rovo Dev API.
+- Bun runs the local proxy entrypoint.
+
+### Deployment/runtime model
+
+The published package output is `dist/`. The local proxy is a development utility started manually with Bun or `start-rovodev.bat`. Do not treat this as a production network service; it has CORS enabled and no proxy-level authentication.
+
+## Important Directories
+
+```text
+src/
+  index.ts                          # package entry point; re-exports plugin
+  plugin.ts                         # OpenCode auth hook and URL rewriting
+  runtime/
+    server.ts                       # local OpenAI-compatible router
+    backend/
+      types.ts                      # backend capability/request contracts
+      rovo-serve-driver.ts          # serialized Rovo Dev /v3 transport
+    diagnostics/
+      logger.ts                     # proxy logging helpers
+    openai/
+      chat.ts                       # /v1/chat/completions
+      models.ts                     # /v1/models
+      responses.ts                  # /v1/responses
+    policy/
+      capability-policy.ts          # backend capability fallbacks
+      model-policy.ts               # default model helpers
+    session/
+      message-compiler.ts           # request normalization and prompt formatting
+      output-guard.ts               # suppresses leading internal narration
+      response-builder.ts           # usage and finish-reason helpers
+      session-store.ts              # in-memory session abstraction
+    stream/
+      sse-parser.ts                 # upstream SSE parsing/text extraction
+      sse-mapper.ts                 # OpenAI-compatible SSE event builders
+rovodev-proxy.ts                    # Bun bootstrap; not included by tsconfig
+start-rovodev.bat                   # Windows helper for serve mode + proxy
+docs/superpowers/                   # design specs and implementation plans
+dist/                               # generated tsc output; do not edit
+node_modules/                       # dependencies; do not edit
+.worktrees/                         # local worktree data; do not edit unless asked
+```
+
+## Development Commands
+
+Install dependencies:
+
+```bash
+npm ci
+```
+
+Build `src/` into `dist/`:
+
 ```bash
 npm run build
+```
+
+Typecheck `src/` without emitting files:
+
+```bash
 npm run typecheck
 ```
 
-### Current tool state
-- Build: configured via `tsc`, emits `dist/`
-- Typecheck: configured via `tsc --noEmit`
-- Lint: not configured
-- Formatter: not configured
-- Tests: not configured
+Start Rovo Dev serve mode:
 
-### Single-test guidance
-There is no test runner wired into this repo today. Do not claim tests exist unless you add them.
-
-If you add tests, pick one runner and add scripts in `package.json`. Good single-test commands would be:
-
-```bash
-node --test test/my-feature.test.ts
-node --test --test-name-pattern "parses SSE" test/my-feature.test.ts
-npx vitest test/my-feature.test.ts
-npx vitest -t "parses SSE" test/my-feature.test.ts
-bun test test/my-feature.test.ts
-bun test -t "parses SSE" test/my-feature.test.ts
-```
-
-### Verification expectations
-- Run `npm run typecheck` before finishing any source change
-- Run `npm run build` when changing published code under `src/`
-- If you add a test runner, run the smallest relevant test first, then broader verification if needed
-
-## Local Proxy Workflow
-The plugin is designed to work with a local Bun proxy that forwards OpenAI-style requests to Rovo Dev serve mode.
-
-### Start Rovo Dev serve mode
 ```bash
 acli rovodev serve 8123 --disable-session-token
 ```
 
-### Start proxy
+Start the proxy with default ports:
+
 ```bash
 bun rovodev-proxy.ts
 ```
-Or run:
+
+Start the proxy with explicit ports:
+
 ```bash
 bun rovodev-proxy.ts --rovodev-port 8123 --proxy-port 4100
 ```
 
 Windows helper:
-- `start-rovodev.bat`
 
-Useful smoke checks:
+```bat
+start-rovodev.bat
+```
+
+Smoke checks:
+
 ```bash
 curl http://localhost:4100/health
 curl http://localhost:4100/v1/models
 ```
 
-## Repository Layout
-- `src/plugin.ts`: OpenCode plugin auth hook and request URL rewriting
-- `src/index.ts`: library entry point that re-exports the plugin
-- `rovodev-proxy.ts`: Bun proxy server translating `/v1/*` requests to Rovo Dev `/v3/*`
-- `tsconfig.json`: strict TS config; only includes `src/**/*`
-- `dist/`: generated build output; do not edit manually
+## Environment Variables
 
-Important nuance: `rovodev-proxy.ts` is not included by the current `tsconfig.json`, so `npm run build` and `npm run typecheck` validate `src/` only.
+No project-specific environment variables are documented or read from source. Runtime configuration is currently via CLI arguments:
 
-## Imports And Modules
-- Use `import` / `export` only; never add CommonJS `require`
-- Use `.js` extensions in relative imports inside TS source that compiles to JS
-- Prefer `import type` for type-only imports
-- Keep imports at the top of the file
-- Group imports in this order with a blank line between groups:
-  1. Node built-ins
-  2. External packages
-  3. Local modules
+- `--rovodev-port` defaults to `8123`
+- `--proxy-port` defaults to `4100`
 
-## Formatting
-- Follow existing style; there is no formatter enforcing it
+Never document or commit Atlassian credentials, API keys, tokens, or raw auth headers.
+
+## Database Notes
+
+No database is configured. Do not add database tooling unless explicitly requested.
+
+## API Notes
+
+- Return structured error payloads shaped like `{ "error": { "message": string, "type": "invalid_request_error" | "proxy_error" } }`.
+- Use `400` for invalid input, `404` for unknown routes, and `502` for upstream/proxy failures.
+- Treat request bodies, JSON payloads, and upstream SSE as untrusted.
+- `RovoServeDriver` preserves a request queue because Rovo Dev serve mode behaves like a single active session. Do not parallelize requests casually.
+- Rovo Dev `409` means the agent is busy; the driver waits/retries and may need to resend the message after idle.
+- Current backend capabilities are conservative: no true model selection, no native tool calling, no multimodal input, no concurrent sessions, no accurate usage, and no resumable responses.
+- Usage/token accounting is synthetic unless a future backend provides reliable values.
+
+## UI Notes
+
+No UI framework or component system is present.
+
+## Testing Notes
+
+There is no test runner configured. Do not claim tests exist unless you add and wire one in `package.json`.
+
+If tests are added later, pick one runner and document exact commands. Reasonable options for this stack include Node’s built-in test runner, Vitest, or Bun test.
+
+## Coding Conventions
+
+### Modules/imports
+
+- Package is ESM. Use `import`/`export`; do not add CommonJS `require`.
+- In TypeScript under `src/`, relative imports should use `.js` extensions so emitted ESM resolves correctly.
+- `rovodev-proxy.ts` is run directly by Bun and may import source files with `.ts` extensions.
+- Prefer `import type` for type-only imports.
+- Keep imports at the top, grouped as: Node built-ins, external packages, local modules.
+
+### Formatting
+
 - Indentation: 2 spaces
 - Strings: double quotes
 - Semicolons: required
-- Use trailing commas in multiline objects and arrays
+- Trailing commas in multiline objects/arrays/calls
 - Wrap long ternaries, chains, and object literals for readability
-- Keep comments sparse and only where the code would otherwise be hard to follow
+- Comments should explain non-obvious constraints, not restate code
 
-## TypeScript Guidance
-- `strict: true` is enabled; preserve strict typing
-- Prefer `unknown` plus narrowing over `any`
-- Keep unavoidable `any` at parsing boundaries only
-- Prefer small local helper types over repeating large inline object types
-- Use `as const` for fixed string literals where narrow types matter
-- Prefer Web standard request/response types (`Request`, `Response`, `Headers`) where applicable
+### TypeScript
 
-## Naming
+- Preserve `strict: true`.
+- Prefer `unknown` plus narrowing over `any`.
+- Keep unavoidable `any` at JSON/SSE parsing boundaries only.
+- Prefer small named helper types over repeated large inline object types.
+- Use `as const` for narrow literal fields where useful.
+- Prefer Web standard request/response types where applicable.
+
+### Naming
+
 - Types, interfaces, classes: `PascalCase`
-- Functions, variables: `camelCase`
+- Functions and variables: `camelCase`
 - Module-level constants: `SCREAMING_SNAKE_CASE`
-- Use domain abbreviations only when standard and already established: `SSE`, `HTTP`, `URL`, `SDK`
+- Use domain abbreviations only when standard or already established: SSE, HTTP, URL, SDK
 
-## Error Handling
-- Treat request bodies, JSON payloads, and upstream responses as untrusted
-- Wrap JSON parsing and network boundaries in `try/catch`
-- Prefer `catch (err: unknown)` and narrow before reading properties
-- Do not leak credentials, tokens, or raw auth headers in errors or logs
-- Return structured proxy errors like `{ "error": { "message": "...", "type": "invalid_request_error" } }` and `{ "error": { "message": "...", "type": "proxy_error" } }`
-- Use status codes deliberately: `400` invalid input, `404` unknown route, `502` upstream/proxy failures
+## Security Rules
 
-## Streaming And Proxy-Specific Rules
-- Preserve the request queue and `enqueue` semantics; do not parallelize proxy requests casually
-- Buffer partial SSE lines between chunks
-- Ignore blank SSE lines and comment lines beginning with `:`
-- Skip malformed JSON events rather than crashing the stream
-- Ensure the client still receives a terminal stop event and `[DONE]` when upstream ends early
-- Preserve the text extraction fallbacks unless you have concrete evidence they are wrong
-- Be careful with retries around Rovo Dev `409` busy responses; session reset behavior matters
+- Do not leak credentials, tokens, or raw auth headers in errors or logs.
+- Copy headers before mutating: `const headers = new Headers(init?.headers);`.
+- Keep the plugin behavior that strips `Authorization` for local proxy requests unless the auth model is intentionally redesigned.
+- The proxy is local-development-only; do not expose it to untrusted networks.
+- Use timeouts for Rovo Dev probes/health checks.
 
-## HTTP And Header Handling
-- Do not mutate caller-provided headers directly; copy with `new Headers(...)`
-- The plugin intentionally strips `Authorization` before proxying local requests
-- Keep `Content-Type: application/json` where the current flow expects JSON
-- Use timeouts for probes or health checks when waiting on Rovo Dev readiness
+## Streaming/SSE Rules
 
-## File Editing Rules
-- Prefer changing `src/` over `dist/`
-- Never hand-edit `dist/`; regenerate it with `npm run build`
-- Keep diffs focused; avoid unrelated refactors while touching proxy or plugin logic
-- If you add a new published entry point, update `package.json` fields such as `main`, `types`, and `files`
+- Buffer partial SSE lines between chunks.
+- Ignore blank lines and comment lines beginning with `:`.
+- Skip malformed JSON SSE events rather than crashing the stream.
+- Preserve text extraction fallbacks in `sse-parser.ts` unless concrete evidence shows they are wrong.
+- Always emit a terminal stop event and `[DONE]` for Chat Completions streams when upstream ends early.
+- Keep Responses API event ordering well-formed: created/in-progress, output item/content part added, deltas, done/completed.
 
-## Cursor And Copilot Rules
-- No `.cursor/rules/` directory found
-- No `.cursorrules` file found
-- No `.github/copilot-instructions.md` file found
+## Agent Workflow Rules
 
-## Before Finishing Work
-- Re-read the changed file boundaries and make sure behavior matches the current plugin/proxy contract
-- Run `npm run typecheck` for source changes
-- Run `npm run build` for changes under `src/` that affect the published package
-- Report explicitly if something could not be verified because the repo has no test/lint setup yet
+AI agents working in this repo must:
+
+1. Inspect existing files before editing.
+2. Prefer minimal, targeted changes.
+3. Preserve the runtime/backend/session/stream separation unless explicitly asked to refactor.
+4. Update `README.md` and this file when changing architecture, commands, endpoints, runtime ports, environment/config behavior, or setup flow.
+5. Avoid generated files, dependencies, build outputs, secrets, and local worktree data.
+6. Run `npm run typecheck` for source changes under `src/`.
+7. Run `npm run build` when changing published code under `src/`.
+8. For `rovodev-proxy.ts` changes, remember it is not covered by `tsconfig.json`; validate with Bun if available and explain any validation gap.
+9. Before finishing merge/conflict work, run a conflict-marker scan such as `git --no-pager diff --check` or grep for `<<<<<<<`, `=======`, `>>>>>>>`.
+10. Report exactly what changed and what was not verified.
+
+## Do Not Edit Unless Asked
+
+- `dist/` generated build output
+- `node_modules/`
+- `.worktrees/`
+- `.git/`
+- lock files unless intentionally changing dependencies
+- secret-bearing files such as `.env` if added later
+
+## Known Pitfalls
+
+- `rovodev-proxy.ts` is intentionally outside `tsconfig.json`; `npm run build` and `npm run typecheck` validate `src/**/*` only.
+- If the proxy port changes, update `PROXY_BASE` in `src/plugin.ts` and rebuild.
+- The OpenCode API key prompt accepts any placeholder string because authentication is via local `acli`.
+- Starting `acli rovodev serve` from the wrong directory can cause workspace/Git warnings; on Windows, prefer `start-rovodev.bat`.
+- Rovo Dev serve mode can return `409 busy`; this is expected and handled through serialized requests and retry/backoff.
+- Multimodal/tool-calling fields are stripped conservatively because the current backend is text-first.
+- Merge conflict markers in source/docs will block pushes; resolve them and stage the resolved files before pushing.

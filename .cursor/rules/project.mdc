@@ -1,0 +1,31 @@
+---
+description: Project-wide coding instructions
+alwaysApply: true
+---
+
+Use `AGENTS.md` as the canonical project context.
+
+- Node.js `>=20`, npm, TypeScript strict mode, ESM package.
+- OpenCode plugin entry is `src/index.ts` → `src/plugin.ts`.
+- Local Bun proxy entrypoint is `rovodev-proxy.ts`; it delegates to `src/runtime/*` and is outside `tsconfig.json`.
+- Runtime routes live in `src/runtime/server.ts`; OpenAI-compatible handlers live in `src/runtime/openai/*`.
+- Backend Rovo serve behavior belongs in `src/runtime/backend/rovo-serve-driver.ts`.
+- Preserve request serialization because Rovo Dev serve mode behaves like one active session.
+- Use `.js` extensions for relative imports in `src/**/*.ts`.
+- Do not edit generated/dependency/local data folders: `dist/`, `node_modules/`, `.worktrees/`.
+- Do not leak credentials, tokens, or raw auth headers in logs/errors.
+- Keep local proxy auth behavior: OpenCode key is a placeholder, `Authorization` is stripped, real auth is via local `acli`.
+- Update `README.md` and `AGENTS.md` when architecture, commands, endpoints, runtime ports, or setup flow change.
+
+Validation for source changes:
+
+```bash
+npm run typecheck
+npm run build
+```
+
+Validation for merge/conflict work:
+
+```bash
+git --no-pager diff --check
+```
