@@ -52,6 +52,10 @@ Use the helper script that starts both Rovo Dev serve mode and the proxy:
 start-rovodev.bat
 ```
 
+The helper script does two important Windows-specific things:
+- starts `acli rovodev serve` from this repo directory so Rovo Dev does not default to `C:\Users\...` as the workspace
+- forwards a detected `git.exe` into the child process PATH to reduce `git-ai` warnings when Git is installed outside standard locations
+
 ### macOS / Linux
 
 1) Start Rovo Dev serve mode (default port `8123`):

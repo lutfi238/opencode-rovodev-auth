@@ -50,23 +50,93 @@ function generateId(): string {
   return "chatcmpl-rovodev-" + Math.random().toString(36).slice(2, 12);
 }
 
+function extractTextFromContentPart(part: unknown): string {
+  if (typeof part === "string") {
+    return part;
+  }
+
+  if (!part || typeof part !== "object") {
+    return "";
+  }
+
+  const block = part as {
+    type?: unknown;
+    text?: unknown;
+    input_text?: unknown;
+    content?: unknown;
+    value?: unknown;
+  };
+
+  if (
+    block.type === "text" ||
+    block.type === "input_text" ||
+    block.type === "output_text"
+  ) {
+    if (typeof block.text === "string") {
+      return block.text;
+    }
+
+    if (typeof block.input_text === "string") {
+      return block.input_text;
+    }
+
+    if (typeof block.content === "string") {
+      return block.content;
+    }
+
+    if (typeof block.value === "string") {
+      return block.value;
+    }
+
+    if (block.text && typeof block.text === "object") {
+      const nestedText = block.text as { value?: unknown; content?: unknown };
+      if (typeof nestedText.value === "string") {
+        return nestedText.value;
+      }
+      if (typeof nestedText.content === "string") {
+        return nestedText.content;
+      }
+    }
+  }
+
+  return "";
+}
+
+function extractTextFromMessageContent(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => extractTextFromContentPart(part))
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  if (content && typeof content === "object") {
+    return extractTextFromContentPart(content);
+  }
+
+  return String(content ?? "");
+}
+
+function summarizeMessages(messages: Array<{ role: string; content: unknown }>): string {
+  return messages
+    .map((message, index) => {
+      const text = extractTextFromMessageContent(message.content).replace(/\s+/g, " ").trim();
+      const preview = text.length > 80 ? `${text.slice(0, 77)}...` : text;
+      return `${index}:${message.role}=${preview || "<empty>"}`;
+    })
+    .join(" | ");
+}
+
 function formatMessages(
-  messages: Array<{ role: string; content: string | any[] }>
+  messages: Array<{ role: string; content: unknown }>
 ): string {
   return messages
     .map((m) => {
-      let content: string;
-      if (typeof m.content === "string") {
-        content = m.content;
-      } else if (Array.isArray(m.content)) {
-        // Handle multimodal content blocks — keep text only
-        content = m.content
-          .filter((b: any) => b.type === "text")
-          .map((b: any) => b.text)
-          .join("\n");
-      } else {
-        content = String(m.content ?? "");
-      }
+      const content = extractTextFromMessageContent(m.content);
 
       switch (m.role) {
         case "system":
@@ -682,19 +752,24 @@ function parseResponsesAPIInput(body: any): any[] {
       if (typeof item === "string") {
         messages.push({ role: "user", content: item });
       } else if (item && typeof item === "object") {
-        // Could be {role, content} or {type: "message", role, content: [...]}
-        if (item.type === "message" && Array.isArray(item.content)) {
-          // Extract text from content blocks
-          const text = item.content
-            .filter((c: any) => c.type === "input_text" || c.type === "output_text" || c.type === "text")
-            .map((c: any) => c.text)
-            .join("\n");
+        // Could be {role, content}, {type:"message", content:[...]},
+        // or direct input_text/text blocks in the input array.
+        if (item.type === "message" && "content" in item) {
+          const text = extractTextFromMessageContent(item.content);
           if (text) {
             messages.push({ role: item.role || "user", content: text });
           }
-        } else if (item.role && item.content) {
+        } else if (item.role && "content" in item) {
           // Simple {role, content} message
-          messages.push({ role: item.role, content: item.content });
+          const text = extractTextFromMessageContent(item.content);
+          if (text) {
+            messages.push({ role: item.role, content: text });
+          }
+        } else {
+          const text = extractTextFromMessageContent(item);
+          if (text) {
+            messages.push({ role: "user", content: text });
+          }
         }
       }
     }
@@ -705,6 +780,26 @@ function parseResponsesAPIInput(body: any): any[] {
   }
 
   return messages;
+}
+
+function normalizeIncomingMessages(body: any): any[] {
+  if (Array.isArray(body?.messages) && body.messages.length > 0) {
+    return body.messages;
+  }
+
+  const parsedResponsesInput = parseResponsesAPIInput(body);
+  if (
+    parsedResponsesInput.length > 1 ||
+    extractTextFromMessageContent(parsedResponsesInput[0]?.content) !== "(empty)"
+  ) {
+    return parsedResponsesInput;
+  }
+
+  if (typeof body?.prompt === "string" && body.prompt.trim()) {
+    return [{ role: "user", content: body.prompt }];
+  }
+
+  return parsedResponsesInput;
 }
 
 // ──────────────────────────────────────────────────────
@@ -1182,12 +1277,12 @@ Bun.serve({
         );
       }
 
-      const messages = body.messages ?? [];
+      const messages = normalizeIncomingMessages(body);
       const model = body.model ?? "rovodev-auto";
       const stream = body.stream ?? false;
 
       console.log(
-        `[proxy] completions ${stream ? "stream" : "sync"} | model=${model} | msgs=${messages.length}`
+        `[proxy] completions ${stream ? "stream" : "sync"} | model=${model} | bodyKeys=${Object.keys(body).join(",")} | msgs=${messages.length} | ${summarizeMessages(messages)}`
       );
 
       return enqueue(async () => {
@@ -1211,12 +1306,12 @@ Bun.serve({
         );
       }
 
-      const messages = parseResponsesAPIInput(body);
+      const messages = normalizeIncomingMessages(body);
       const model = body.model ?? "rovodev-auto";
       const stream = body.stream ?? false;
 
       console.log(
-        `[proxy] responses ${stream ? "stream" : "sync"} | model=${model} | msgs=${messages.length}`
+        `[proxy] responses ${stream ? "stream" : "sync"} | model=${model} | bodyKeys=${Object.keys(body).join(",")} | msgs=${messages.length} | ${summarizeMessages(messages)}`
       );
 
       return enqueue(async () => {

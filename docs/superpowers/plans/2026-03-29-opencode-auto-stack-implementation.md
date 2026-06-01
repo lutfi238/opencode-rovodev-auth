@@ -1,0 +1,250 @@
+# OpenCode Auto Stack Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Keep the current OpenCode setup automatic by default while preserving stability and avoiding new competing meta-layers.
+
+**Architecture:** Preserve `superpowers` as the only broad behavior layer, keep narrowly scoped auto-guidance like `playwright-hybrid.js`, and treat `swarm` as healthy but secondary orchestration. Implementation should prefer verification and compatibility fixes over adding new prompt-injection systems.
+
+**Tech Stack:** OpenCode global config, plugin bootstrap files, Windows filesystem compatibility, `swarm` CLI, JSON config validation
+
+---
+
+## File Structure
+
+- Modify: `C:/Users/LutFi/.config/opencode/opencode.json`
+  - Keep the stable plugin and MCP stack intact.
+- Keep: `C:/Users/LutFi/.config/opencode/plugins/playwright-hybrid.js`
+  - Preserve browser-task auto-guidance bootstrap.
+- Keep: `C:/Users/LutFi/.config/opencode/plugin/swarm.ts`
+  - Preserve generated swarm wrapper without manual edits.
+- Keep: `C:/Users/LutFi/.config/opencode/skills` -> `C:/Users/LutFi/.config/opencode/skill`
+  - Preserve compatibility between old and new skills directory expectations.
+- Verify: `docs/superpowers/specs/2026-03-29-opencode-auto-stack-design.md`
+  - Keep implementation aligned with the approved design.
+
+This plan intentionally avoids creating a new bootstrap plugin or a new broad system prompt injector.
+
+### Task 1: Freeze The Recommended Auto Stack
+
+**Files:**
+- Modify: `C:/Users/LutFi/.config/opencode/opencode.json`
+- Verify: `docs/superpowers/specs/2026-03-29-opencode-auto-stack-design.md`
+
+- [ ] **Step 1: Re-read the approved design before touching config**
+
+Read `docs/superpowers/specs/2026-03-29-opencode-auto-stack-design.md` and confirm the implementation goals are still:
+
+```text
+- superpowers stays primary
+- swarm stays secondary
+- no new meta-awareness plugin is added
+- existing safety/context/browser automation stays enabled
+```
+
+- [ ] **Step 2: Confirm the desired plugin list is the current plugin list**
+
+Read `C:/Users/LutFi/.config/opencode/opencode.json` and confirm the `plugin` array remains exactly:
+
+```json
+[
+  "@zhafron/opencode-iflow-auth",
+  "superpowers@git+https://github.com/obra/superpowers.git",
+  "opencode-mem",
+  "@openspoon/subtask2@latest",
+  "envsitter-guard@latest",
+  "@tarquinen/opencode-dcp@latest",
+  "opencode-notify@latest"
+]
+```
+
+If the list already matches, make no edit.
+
+- [ ] **Step 3: Confirm the desired MCP list is the current MCP list**
+
+Read the `mcp` section of `C:/Users/LutFi/.config/opencode/opencode.json` and confirm it contains only these active entries:
+
+```json
+{
+  "firecrawl-mcp": { "type": "remote" },
+  "context7": { "type": "remote" },
+  "playwright": { "type": "local" }
+}
+```
+
+If any removed MCP such as `serena` still appears, delete only that block.
+
+- [ ] **Step 4: Validate the config file after any edit**
+
+Run:
+
+```bash
+node -e 'JSON.parse(require("fs").readFileSync("C:/Users/LutFi/.config/opencode/opencode.json","utf8")); console.log("opencode.json parse ok")'
+```
+
+Expected: `opencode.json parse ok`
+
+- [ ] **Step 5: Do not create a new behavior injector**
+
+Explicitly leave these ideas unimplemented:
+
+```text
+- no new plugin that injects a second global process system
+- no new MCP whose purpose is only to tell the agent what to do
+- no forced promotion of swarm into the default path for ordinary tasks
+```
+
+- [ ] **Step 6: Record that Task 1 is complete**
+
+Success condition:
+
+```text
+The stable plugin and MCP baseline is preserved without adding a new meta-layer.
+```
+
+### Task 2: Preserve Narrow Auto-Guidance And Path Compatibility
+
+**Files:**
+- Keep: `C:/Users/LutFi/.config/opencode/plugins/playwright-hybrid.js`
+- Keep: `C:/Users/LutFi/.config/opencode/plugin/swarm.ts`
+- Keep: `C:/Users/LutFi/.config/opencode/skills`
+- Keep: `C:/Users/LutFi/.config/opencode/skill`
+
+- [ ] **Step 1: Confirm browser-task guidance stays narrowly scoped**
+
+Read `C:/Users/LutFi/.config/opencode/plugins/playwright-hybrid.js` and confirm the bootstrap still only injects browser guidance by reading the Playwright skill file:
+
+```js
+const skillPath = path.join(configDir, 'skills', 'playwright-hybrid', 'SKILL.md');
+```
+
+and appending only Playwright-specific guidance:
+
+```js
+(output.system ||= []).push(bootstrap);
+```
+
+Do not broaden this plugin into a generic workflow injector.
+
+- [ ] **Step 2: Confirm swarm remains generated and self-contained**
+
+Read `C:/Users/LutFi/.config/opencode/plugin/swarm.ts` and confirm the generated wrapper is still self-contained, shells out to the `swarm` CLI, and remains managed by `swarm setup`.
+
+Verification target:
+
+```ts
+// Generated by: swarm setup
+// ONLY import from: @opencode-ai/plugin, @opencode-ai/sdk, node:*
+// Shell out to `swarm` CLI for all tool execution
+```
+
+Do not hand-edit this file unless `swarm setup` regeneration is truly required.
+
+- [ ] **Step 3: Confirm old and new skills paths can coexist**
+
+Verify both paths exist for compatibility:
+
+```text
+C:/Users/LutFi/.config/opencode/skill
+C:/Users/LutFi/.config/opencode/skills
+```
+
+Expected outcome:
+
+```text
+New swarm-generated layout works, and older code that still resolves `skills/` keeps working.
+```
+
+- [ ] **Step 4: If compatibility is broken, restore only the alias/junction**
+
+Run only if `skills/` is missing:
+
+```bash
+powershell -NoProfile -Command "New-Item -ItemType Junction -Path 'C:/Users/LutFi/.config/opencode/skills' -Target 'C:/Users/LutFi/.config/opencode/skill'"
+```
+
+Expected: PowerShell reports creation of the `skills` junction.
+
+- [ ] **Step 5: Verify swarm health after compatibility checks**
+
+Run:
+
+```bash
+swarm config
+swarm doctor
+```
+
+Expected:
+- config files show `✓`
+- Bun and OpenCode show `✓`
+- optional dependencies may still show warnings, which is acceptable
+
+- [ ] **Step 6: Record that Task 2 is complete**
+
+Success condition:
+
+```text
+Auto-guidance stays narrow, swarm stays ready but secondary, and skills path compatibility remains intact.
+```
+
+### Task 3: Final Verification And Handoff
+
+**Files:**
+- Verify: `C:/Users/LutFi/.config/opencode/opencode.json`
+- Verify: `C:/Users/LutFi/.config/opencode/plugins/playwright-hybrid.js`
+- Verify: `C:/Users/LutFi/.config/opencode/plugin/swarm.ts`
+
+- [ ] **Step 1: Re-run the JSON validation command**
+
+Run:
+
+```bash
+node -e 'JSON.parse(require("fs").readFileSync("C:/Users/LutFi/.config/opencode/opencode.json","utf8")); console.log("opencode.json parse ok")'
+```
+
+Expected: `opencode.json parse ok`
+
+- [ ] **Step 2: Re-check that Serena is still absent**
+
+Run:
+
+```text
+Search for: serena
+Path: C:/Users/LutFi/.config/opencode
+```
+
+Expected: no matches in active OpenCode config.
+
+- [ ] **Step 3: Summarize the intended steady-state behavior**
+
+Report the final state as:
+
+```text
+- superpowers is the primary automatic decision layer
+- playwright-hybrid remains auto for browser work
+- envsitter-guard remains auto for secret-sensitive files
+- dcp remains auto for context hygiene
+- notify remains auto for long-running work
+- subtask2 remains the default lightweight orchestration layer
+- swarm remains installed and ready, but secondary
+```
+
+- [ ] **Step 4: Restart OpenCode to pick up the current stack**
+
+Expected user-facing effect after restart:
+
+```text
+The existing automatic behaviors load cleanly without adding a second competing behavior system.
+```
+
+- [ ] **Step 5: Commit only if explicitly requested**
+
+If the user asks for a commit later, stage only the files intentionally changed during implementation.
+
+- [ ] **Step 6: Record final completion**
+
+Success condition:
+
+```text
+The current setup is as automatic as practical for now, with stability prioritized over aggressive automation.
+```
